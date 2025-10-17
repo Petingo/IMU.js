@@ -79,38 +79,62 @@ scene.add( axisXLine, axisYLine, axisZLine );
 function animate(): void {
     requestAnimationFrame( animate );
     
+    const currentTime = Date.now();
+    
     // Check orientation alignment with anchor points
     if (cameraState.isActive) {
-        for (const anchor of anchorPoints) {
-            const isAligned = checkOrientationAlignment(anchor);
+        // Only do expensive calculations periodically
+        if ((currentTime - lastCheckTime) > checkInterval) {
+            lastCheckTime = currentTime;
             
-            if (isAligned) {
-                // Change color to indicate alignment
-                if (!anchor.isActive) {
-                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xff0000); // Red when aligned
-                    anchor.isActive = true;
-                    currentTargetAnchor = anchor;
-                    stillnessTimer = 0;
-                }
-                
-                // Check for stillness (1 second)
-                stillnessTimer += 16; // Assuming 60fps, 16ms per frame
-                if (stillnessTimer >= 1000 && !anchor.capturedImage) {
-                    const photo = capturePhoto();
-                    if (photo) {
-                        renderImageOnAnchor(anchor, photo);
-                        console.log('Photo captured and rendered on anchor point');
-                    }
-                }
-            } else {
-                // Reset color when not aligned
+            // First, reset all anchors to green
+            for (const anchor of anchorPoints) {
                 if (anchor.isActive) {
-                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00); // Green when not aligned
+                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00);
                     anchor.isActive = false;
-                    if (currentTargetAnchor === anchor) {
-                        currentTargetAnchor = null;
-                        stillnessTimer = 0;
+                }
+            }
+            
+            // Find the anchor with the highest alignment score
+            let bestAlignment = 0;
+            let bestAnchor: AnchorPoint | null = null;
+            
+            for (const anchor of anchorPoints) {
+                const alignment = getAlignmentScore(anchor);
+                if (alignment > bestAlignment) {
+                    bestAlignment = alignment;
+                    bestAnchor = anchor;
+                }
+            }
+            
+            // Only activate the best anchor if it meets the threshold
+            if (bestAnchor && bestAlignment > 0.8) {
+                (bestAnchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
+                bestAnchor.isActive = true;
+                currentTargetAnchor = bestAnchor;
+                stillnessTimer = 0;
+                console.log('Best anchor activated:', bestAlignment.toFixed(3));
+            } else {
+                currentTargetAnchor = null;
+                stillnessTimer = 0;
+            }
+        }
+        
+        // Check for photo capture every frame for accurate timing
+        if (currentTargetAnchor) {
+            stillnessTimer += 16; // 60fps timing
+            if (stillnessTimer >= 1000) {
+                const photo = capturePhoto();
+                if (photo) {
+                    // Remove old image if it exists
+                    if (currentTargetAnchor.imageMesh) {
+                        scene.remove(currentTargetAnchor.imageMesh);
                     }
+                    renderImageOnAnchor(currentTargetAnchor, photo);
+                    console.log('Photo captured and rendered on anchor point');
+                    
+                    // Reset the timer to prevent immediate re-capture
+                    stillnessTimer = 0;
                 }
             }
         }
@@ -294,27 +318,36 @@ async function requestCameraAccess(): Promise<boolean> {
 // Function to capture photo
 function capturePhoto(): string | null {
     if (!cameraState.video || !cameraState.isActive) {
+        console.log('Camera not ready for photo capture');
         return null;
     }
     
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     
-    if (!context) return null;
+    if (!context) {
+        console.log('Failed to get canvas context');
+        return null;
+    }
     
     canvas.width = cameraState.video.videoWidth;
     canvas.height = cameraState.video.videoHeight;
     
     context.drawImage(cameraState.video, 0, 0);
-    return canvas.toDataURL('image/jpeg');
+    const imageData = canvas.toDataURL('image/jpeg');
+    console.log('Photo captured, size:', canvas.width, 'x', canvas.height);
+    return imageData;
 }
 
 // Function to render captured image on anchor point
 function renderImageOnAnchor(anchor: AnchorPoint, imageData: string): void {
-    const texture = new THREE.TextureLoader().load(imageData);
-    const imageGeometry = new THREE.PlaneGeometry(2, 2);
+    console.log('Starting to render image on anchor');
+    
+    // Create a simple plane geometry first
+    const imageGeometry = new THREE.PlaneGeometry(4, 4);
+    
+    // Create material with the texture
     const imageMaterial = new THREE.MeshBasicMaterial({ 
-        map: texture, 
         transparent: true,
         side: THREE.DoubleSide
     });
@@ -323,31 +356,64 @@ function renderImageOnAnchor(anchor: AnchorPoint, imageData: string): void {
     
     // Position the image to face the center of the sphere
     const direction = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), anchor.position).normalize();
-    imageMesh.position.copy(anchor.position).add(direction.multiplyScalar(0.5));
+    imageMesh.position.copy(anchor.position).add(direction.multiplyScalar(1.0));
     imageMesh.lookAt(0, 0, 0);
+    
+    // Load texture and apply it
+    const texture = new THREE.TextureLoader().load(imageData, (loadedTexture) => {
+        console.log('Texture loaded successfully');
+        // Update the material with the loaded texture
+        imageMaterial.map = loadedTexture;
+        imageMaterial.needsUpdate = true;
+        
+        // Update geometry with correct aspect ratio
+        const aspectRatio = loadedTexture.image.width / loadedTexture.image.height;
+        const imageSize = 4;
+        imageMesh.geometry.dispose();
+        imageMesh.geometry = new THREE.PlaneGeometry(
+            imageSize * aspectRatio,
+            imageSize
+        );
+        
+        console.log('Image rendered at position:', imageMesh.position);
+        console.log('Image size:', imageSize * aspectRatio, 'x', imageSize);
+    });
     
     scene.add(imageMesh);
     anchor.imageMesh = imageMesh;
     anchor.capturedImage = imageData;
+    
+    console.log('Image mesh added to scene');
 }
 
-// Function to check if camera orientation aligns with anchor point
-function checkOrientationAlignment(anchor: AnchorPoint): boolean {
+// Function to get alignment score for an anchor point
+function getAlignmentScore(anchor: AnchorPoint): number {
+    // Get camera direction (where camera is looking)
     const cameraDirection = new THREE.Vector3();
     camera.getWorldDirection(cameraDirection);
     
+    // Get direction from camera to anchor point
     const anchorDirection = new THREE.Vector3().subVectors(anchor.position, camera.position).normalize();
     
+    // Calculate how aligned the camera is with the anchor
     const dotProduct = cameraDirection.dot(anchorDirection);
-    const threshold = 0.9; // Adjust this value for sensitivity
     
-    return dotProduct > threshold;
+    return dotProduct;
+}
+
+// Function to check if camera orientation aligns with anchor point (kept for compatibility)
+function checkOrientationAlignment(anchor: AnchorPoint): boolean {
+    return getAlignmentScore(anchor) > 0.8;
 }
 
 // Variables for stillness detection
 let stillnessTimer: number = 0;
 let lastStillnessTime: number = 0;
 let currentTargetAnchor: AnchorPoint | null = null;
+
+// Performance optimization variables
+let lastCheckTime: number = 0;
+const checkInterval: number = 100; // Check every 100ms instead of every frame
 
 const rotationParams: RotationParams = {
     x: 0,

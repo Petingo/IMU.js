@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
+import { GUI } from 'https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.js';
 import { DeviceOrientationControls } from './DeviceOrientationControls.js';
 import { Logger } from './Logger.js';
 
@@ -18,6 +18,20 @@ interface RotationParams {
     activateTracker: () => void;
 }
 
+interface AnchorPoint {
+    position: THREE.Vector3;
+    mesh: THREE.Mesh;
+    isActive: boolean;
+    capturedImage?: string;
+    imageMesh?: THREE.Mesh;
+}
+
+interface CameraState {
+    stream: MediaStream | null;
+    video: HTMLVideoElement | null;
+    isActive: boolean;
+}
+
 const windowSize: WindowSize = {
     width: window.innerWidth,
     height: window.innerHeight
@@ -30,6 +44,17 @@ const renderer = new THREE.WebGLRenderer();
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize( window.innerWidth, window.innerHeight );
 document.body.appendChild( renderer.domElement );
+
+// Camera state for photo capture
+const cameraState: CameraState = {
+    stream: null,
+    video: null,
+    isActive: false
+};
+
+// Anchor points array
+const anchorPoints: AnchorPoint[] = [];
+const sphereRadius = 15;
 
 const geometry = new THREE.SphereGeometry( 15, 16, 8 ); 
 const material = new THREE.PointsMaterial( { color: 0x888888 } );
@@ -53,6 +78,44 @@ scene.add( axisXLine, axisYLine, axisZLine );
 
 function animate(): void {
     requestAnimationFrame( animate );
+    
+    // Check orientation alignment with anchor points
+    if (cameraState.isActive) {
+        for (const anchor of anchorPoints) {
+            const isAligned = checkOrientationAlignment(anchor);
+            
+            if (isAligned) {
+                // Change color to indicate alignment
+                if (!anchor.isActive) {
+                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xff0000); // Red when aligned
+                    anchor.isActive = true;
+                    currentTargetAnchor = anchor;
+                    stillnessTimer = 0;
+                }
+                
+                // Check for stillness (1 second)
+                stillnessTimer += 16; // Assuming 60fps, 16ms per frame
+                if (stillnessTimer >= 1000 && !anchor.capturedImage) {
+                    const photo = capturePhoto();
+                    if (photo) {
+                        renderImageOnAnchor(anchor, photo);
+                        console.log('Photo captured and rendered on anchor point');
+                    }
+                }
+            } else {
+                // Reset color when not aligned
+                if (anchor.isActive) {
+                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00); // Green when not aligned
+                    anchor.isActive = false;
+                    if (currentTargetAnchor === anchor) {
+                        currentTargetAnchor = null;
+                        stillnessTimer = 0;
+                    }
+                }
+            }
+        }
+    }
+    
     renderer.render( scene, camera );
 }
 
@@ -104,6 +167,188 @@ function handleOrientation(event: DeviceOrientationEvent): void {
     camera.up = new THREE.Vector3(0, 0, 1);
 }
 
+// Function to create anchor points on the sphere
+function createAnchorPoints(): void {
+    const anchorGeometry = new THREE.SphereGeometry(0.3, 8, 6);
+    const anchorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+    
+    // Top section (3 anchors)
+    for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * Math.PI * 2;
+        const x = Math.cos(angle) * sphereRadius * 0.8;
+        const z = Math.sin(angle) * sphereRadius * 0.8;
+        const y = sphereRadius * 0.8;
+        
+        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
+        anchorMesh.position.set(x, y, z);
+        scene.add(anchorMesh);
+        
+        anchorPoints.push({
+            position: new THREE.Vector3(x, y, z),
+            mesh: anchorMesh,
+            isActive: false
+        });
+    }
+    
+    // Top-mid section (9 anchors)
+    for (let i = 0; i < 9; i++) {
+        const angle = (i / 9) * Math.PI * 2;
+        const x = Math.cos(angle) * sphereRadius * 0.4;
+        const z = Math.sin(angle) * sphereRadius * 0.4;
+        const y = sphereRadius * 0.4;
+        
+        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
+        anchorMesh.position.set(x, y, z);
+        scene.add(anchorMesh);
+        
+        anchorPoints.push({
+            position: new THREE.Vector3(x, y, z),
+            mesh: anchorMesh,
+            isActive: false
+        });
+    }
+    
+    // Mid section (12 anchors)
+    for (let i = 0; i < 12; i++) {
+        const angle = (i / 12) * Math.PI * 2;
+        const x = Math.cos(angle) * sphereRadius;
+        const z = Math.sin(angle) * sphereRadius;
+        const y = 0;
+        
+        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
+        anchorMesh.position.set(x, y, z);
+        scene.add(anchorMesh);
+        
+        anchorPoints.push({
+            position: new THREE.Vector3(x, y, z),
+            mesh: anchorMesh,
+            isActive: false
+        });
+    }
+    
+    // Bottom-mid section (9 anchors)
+    for (let i = 0; i < 9; i++) {
+        const angle = (i / 9) * Math.PI * 2;
+        const x = Math.cos(angle) * sphereRadius * 0.4;
+        const z = Math.sin(angle) * sphereRadius * 0.4;
+        const y = -sphereRadius * 0.4;
+        
+        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
+        anchorMesh.position.set(x, y, z);
+        scene.add(anchorMesh);
+        
+        anchorPoints.push({
+            position: new THREE.Vector3(x, y, z),
+            mesh: anchorMesh,
+            isActive: false
+        });
+    }
+    
+    // Bottom section (3 anchors)
+    for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * Math.PI * 2;
+        const x = Math.cos(angle) * sphereRadius * 0.8;
+        const z = Math.sin(angle) * sphereRadius * 0.8;
+        const y = -sphereRadius * 0.8;
+        
+        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
+        anchorMesh.position.set(x, y, z);
+        scene.add(anchorMesh);
+        
+        anchorPoints.push({
+            position: new THREE.Vector3(x, y, z),
+            mesh: anchorMesh,
+            isActive: false
+        });
+    }
+}
+
+// Function to request camera access
+async function requestCameraAccess(): Promise<boolean> {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
+        });
+        
+        cameraState.stream = stream;
+        cameraState.isActive = true;
+        
+        // Create video element for photo capture
+        const video = document.createElement('video');
+        video.srcObject = stream;
+        video.play();
+        cameraState.video = video;
+        
+        console.log('Camera access granted');
+        return true;
+    } catch (error) {
+        console.log('Camera access denied:', error);
+        return false;
+    }
+}
+
+// Function to capture photo
+function capturePhoto(): string | null {
+    if (!cameraState.video || !cameraState.isActive) {
+        return null;
+    }
+    
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    if (!context) return null;
+    
+    canvas.width = cameraState.video.videoWidth;
+    canvas.height = cameraState.video.videoHeight;
+    
+    context.drawImage(cameraState.video, 0, 0);
+    return canvas.toDataURL('image/jpeg');
+}
+
+// Function to render captured image on anchor point
+function renderImageOnAnchor(anchor: AnchorPoint, imageData: string): void {
+    const texture = new THREE.TextureLoader().load(imageData);
+    const imageGeometry = new THREE.PlaneGeometry(2, 2);
+    const imageMaterial = new THREE.MeshBasicMaterial({ 
+        map: texture, 
+        transparent: true,
+        side: THREE.DoubleSide
+    });
+    
+    const imageMesh = new THREE.Mesh(imageGeometry, imageMaterial);
+    
+    // Position the image to face the center of the sphere
+    const direction = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), anchor.position).normalize();
+    imageMesh.position.copy(anchor.position).add(direction.multiplyScalar(0.5));
+    imageMesh.lookAt(0, 0, 0);
+    
+    scene.add(imageMesh);
+    anchor.imageMesh = imageMesh;
+    anchor.capturedImage = imageData;
+}
+
+// Function to check if camera orientation aligns with anchor point
+function checkOrientationAlignment(anchor: AnchorPoint): boolean {
+    const cameraDirection = new THREE.Vector3();
+    camera.getWorldDirection(cameraDirection);
+    
+    const anchorDirection = new THREE.Vector3().subVectors(anchor.position, camera.position).normalize();
+    
+    const dotProduct = cameraDirection.dot(anchorDirection);
+    const threshold = 0.9; // Adjust this value for sensitivity
+    
+    return dotProduct > threshold;
+}
+
+// Variables for stillness detection
+let stillnessTimer: number = 0;
+let lastStillnessTime: number = 0;
+let currentTargetAnchor: AnchorPoint | null = null;
+
 const rotationParams: RotationParams = {
     x: 0,
     y: 0,
@@ -112,6 +357,12 @@ const rotationParams: RotationParams = {
         const cameraControl = new DeviceOrientationControls(camera);
     }
 }
+
+// Initialize anchor points
+createAnchorPoints();
+
+// Initialize camera access
+requestCameraAccess();
 
 const gui = new GUI();
 

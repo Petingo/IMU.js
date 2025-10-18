@@ -12,3 +12,30 @@ declare module 'https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.js' {
         onFinishChange(callback: (value: any) => void): any;
     }
 }
+
+declare module 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js' {
+    import * as THREE from 'three';
+    
+    export class OrbitControls {
+        constructor(camera: THREE.Camera, domElement: HTMLElement);
+        enabled: boolean;
+        enableDamping: boolean;
+        dampingFactor: number;
+        enableZoom: boolean;
+        enablePan: boolean;
+        enableRotate: boolean;
+        mouseButtons: {
+            LEFT: number;
+            MIDDLE: number;
+            RIGHT: number;
+        };
+        touches: {
+            ONE: number;
+            TWO: number;
+        };
+        target: THREE.Vector3;
+        maxDistance: number;
+        minDistance: number;
+        update(): void;
+    }
+}

@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { GUI } from 'https://unpkg.com/lil-gui@0.19.2/dist/lil-gui.esm.js';
 import { DeviceOrientationControls } from './DeviceOrientationControls.js';
 import { Logger } from './Logger.js';
+import { OrbitControls } from 'https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js';
+import { AnchorManager, AnchorPoint } from './AnchorManager.js';
+import { PhotoCaptureManager, CameraState } from './PhotoCaptureManager.js';
 
 // Initialize logger
 const logger = Logger.getInstance();
@@ -16,21 +19,10 @@ interface RotationParams {
     y: number;
     z: number;
     activateTracker: () => void;
+    useDragControls: boolean;
 }
 
-interface AnchorPoint {
-    position: THREE.Vector3;
-    mesh: THREE.Mesh;
-    isActive: boolean;
-    capturedImage?: string;
-    imageMesh?: THREE.Mesh;
-}
 
-interface CameraState {
-    stream: MediaStream | null;
-    video: HTMLVideoElement | null;
-    isActive: boolean;
-}
 
 const windowSize: WindowSize = {
     width: window.innerWidth,
@@ -39,22 +31,20 @@ const windowSize: WindowSize = {
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+camera.position.set(0, 0, 30); // Set initial camera position
 
 const renderer = new THREE.WebGLRenderer();
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize( window.innerWidth, window.innerHeight );
 document.body.appendChild( renderer.domElement );
 
-// Camera state for photo capture
-const cameraState: CameraState = {
-    stream: null,
-    video: null,
-    isActive: false
-};
+// Managers
+const anchorManager = AnchorManager.getInstance();
+const photoCaptureManager = PhotoCaptureManager.getInstance();
 
-// Anchor points array
-const anchorPoints: AnchorPoint[] = [];
-const sphereRadius = 15;
+// Controls
+let orbitControls: OrbitControls | null = null;
+let deviceOrientationControls: DeviceOrientationControls | null = null;
 
 const geometry = new THREE.SphereGeometry( 15, 16, 8 ); 
 const material = new THREE.PointsMaterial( { color: 0x888888 } );
@@ -76,69 +66,46 @@ const axisZLine = new THREE.Line(
 );
 scene.add( axisXLine, axisYLine, axisZLine );
 
+// Add centered targeting circle as screen overlay
+const circleGeometry = new THREE.RingGeometry(0.8, 1.0, 32);
+const circleMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0xffffff, 
+    transparent: true, 
+    opacity: 0.8,
+    side: THREE.DoubleSide
+});
+const targetingCircle = new THREE.Mesh(circleGeometry, circleMaterial);
+targetingCircle.position.set(0, 0, -0.5); // Very close to camera
+targetingCircle.lookAt(0, 0, 1); // Face forward
+targetingCircle.renderOrder = 999; // Render on top
+camera.add(targetingCircle); // Attach to camera instead of scene
+
 function animate(): void {
     requestAnimationFrame( animate );
     
     const currentTime = Date.now();
     
-    // Check orientation alignment with anchor points
-    if (cameraState.isActive) {
-        // Only do expensive calculations periodically
-        if ((currentTime - lastCheckTime) > checkInterval) {
-            lastCheckTime = currentTime;
-            
-            // First, reset all anchors to green
-            for (const anchor of anchorPoints) {
-                if (anchor.isActive) {
-                    (anchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00);
-                    anchor.isActive = false;
-                }
-            }
-            
-            // Find the anchor with the highest alignment score
-            let bestAlignment = 0;
-            let bestAnchor: AnchorPoint | null = null;
-            
-            for (const anchor of anchorPoints) {
-                const alignment = getAlignmentScore(anchor);
-                if (alignment > bestAlignment) {
-                    bestAlignment = alignment;
-                    bestAnchor = anchor;
-                }
-            }
-            
-            // Only activate the best anchor if it meets the threshold
-            if (bestAnchor && bestAlignment > 0.8) {
-                (bestAnchor.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xff0000);
-                bestAnchor.isActive = true;
-                currentTargetAnchor = bestAnchor;
-                stillnessTimer = 0;
-                console.log('Best anchor activated:', bestAlignment.toFixed(3));
-            } else {
-                currentTargetAnchor = null;
-                stillnessTimer = 0;
-            }
-        }
-        
-        // Check for photo capture every frame for accurate timing
-        if (currentTargetAnchor) {
-            stillnessTimer += 16; // 60fps timing
-            if (stillnessTimer >= 1000) {
-                const photo = capturePhoto();
-                if (photo) {
-                    // Remove old image if it exists
-                    if (currentTargetAnchor.imageMesh) {
-                        scene.remove(currentTargetAnchor.imageMesh);
-                    }
-                    renderImageOnAnchor(currentTargetAnchor, photo);
-                    console.log('Photo captured and rendered on anchor point');
-                    
-                    // Reset the timer to prevent immediate re-capture
-                    stillnessTimer = 0;
-                }
-            }
+    // Update controls
+    if (orbitControls && orbitControls.enabled) {
+        orbitControls.update();
+        // Debug: log camera position occasionally
+        if (Math.random() < 0.01) { // 1% chance to log
+            console.log('Camera position:', camera.position);
         }
     }
+    
+    // Update anchor alignment and photo capture
+    anchorManager.updateAlignment(camera, photoCaptureManager.getCameraState());
+    anchorManager.updatePhotoCapture(photoCaptureManager.getCameraState(), 
+        () => photoCaptureManager.capturePhoto(), 
+        (anchor: AnchorPoint, imageData: string) => {
+            // Remove old image if it exists
+            if (anchor.imageMesh) {
+                scene.remove(anchor.imageMesh);
+            }
+            photoCaptureManager.renderImageOnAnchor(anchor, imageData, scene);
+        }
+    );
     
     renderer.render( scene, camera );
 }
@@ -191,255 +158,92 @@ function handleOrientation(event: DeviceOrientationEvent): void {
     camera.up = new THREE.Vector3(0, 0, 1);
 }
 
-// Function to create anchor points on the sphere
-function createAnchorPoints(): void {
-    const anchorGeometry = new THREE.SphereGeometry(0.3, 8, 6);
-    const anchorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    
-    // Top section (3 anchors)
-    for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * Math.PI * 2;
-        const x = Math.cos(angle) * sphereRadius * 0.8;
-        const z = Math.sin(angle) * sphereRadius * 0.8;
-        const y = sphereRadius * 0.8;
-        
-        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-        anchorMesh.position.set(x, y, z);
-        scene.add(anchorMesh);
-        
-        anchorPoints.push({
-            position: new THREE.Vector3(x, y, z),
-            mesh: anchorMesh,
-            isActive: false
-        });
-    }
-    
-    // Top-mid section (9 anchors)
-    for (let i = 0; i < 9; i++) {
-        const angle = (i / 9) * Math.PI * 2;
-        const x = Math.cos(angle) * sphereRadius * 0.4;
-        const z = Math.sin(angle) * sphereRadius * 0.4;
-        const y = sphereRadius * 0.4;
-        
-        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-        anchorMesh.position.set(x, y, z);
-        scene.add(anchorMesh);
-        
-        anchorPoints.push({
-            position: new THREE.Vector3(x, y, z),
-            mesh: anchorMesh,
-            isActive: false
-        });
-    }
-    
-    // Mid section (12 anchors)
-    for (let i = 0; i < 12; i++) {
-        const angle = (i / 12) * Math.PI * 2;
-        const x = Math.cos(angle) * sphereRadius;
-        const z = Math.sin(angle) * sphereRadius;
-        const y = 0;
-        
-        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-        anchorMesh.position.set(x, y, z);
-        scene.add(anchorMesh);
-        
-        anchorPoints.push({
-            position: new THREE.Vector3(x, y, z),
-            mesh: anchorMesh,
-            isActive: false
-        });
-    }
-    
-    // Bottom-mid section (9 anchors)
-    for (let i = 0; i < 9; i++) {
-        const angle = (i / 9) * Math.PI * 2;
-        const x = Math.cos(angle) * sphereRadius * 0.4;
-        const z = Math.sin(angle) * sphereRadius * 0.4;
-        const y = -sphereRadius * 0.4;
-        
-        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-        anchorMesh.position.set(x, y, z);
-        scene.add(anchorMesh);
-        
-        anchorPoints.push({
-            position: new THREE.Vector3(x, y, z),
-            mesh: anchorMesh,
-            isActive: false
-        });
-    }
-    
-    // Bottom section (3 anchors)
-    for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * Math.PI * 2;
-        const x = Math.cos(angle) * sphereRadius * 0.8;
-        const z = Math.sin(angle) * sphereRadius * 0.8;
-        const y = -sphereRadius * 0.8;
-        
-        const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-        anchorMesh.position.set(x, y, z);
-        scene.add(anchorMesh);
-        
-        anchorPoints.push({
-            position: new THREE.Vector3(x, y, z),
-            mesh: anchorMesh,
-            isActive: false
-        });
-    }
-}
 
-// Function to request camera access
-async function requestCameraAccess(): Promise<boolean> {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: 'environment',
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            } 
-        });
-        
-        cameraState.stream = stream;
-        cameraState.isActive = true;
-        
-        // Create video element for photo capture
-        const video = document.createElement('video');
-        video.srcObject = stream;
-        video.play();
-        cameraState.video = video;
-        
-        console.log('Camera access granted');
-        return true;
-    } catch (error) {
-        console.log('Camera access denied:', error);
-        return false;
-    }
-}
 
-// Function to capture photo
-function capturePhoto(): string | null {
-    if (!cameraState.video || !cameraState.isActive) {
-        console.log('Camera not ready for photo capture');
-        return null;
-    }
-    
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    if (!context) {
-        console.log('Failed to get canvas context');
-        return null;
-    }
-    
-    canvas.width = cameraState.video.videoWidth;
-    canvas.height = cameraState.video.videoHeight;
-    
-    context.drawImage(cameraState.video, 0, 0);
-    const imageData = canvas.toDataURL('image/jpeg');
-    console.log('Photo captured, size:', canvas.width, 'x', canvas.height);
-    return imageData;
-}
 
-// Function to render captured image on anchor point
-function renderImageOnAnchor(anchor: AnchorPoint, imageData: string): void {
-    console.log('Starting to render image on anchor');
-    
-    // Create a simple plane geometry first
-    const imageGeometry = new THREE.PlaneGeometry(4, 4);
-    
-    // Create material with the texture
-    const imageMaterial = new THREE.MeshBasicMaterial({ 
-        transparent: true,
-        side: THREE.DoubleSide
-    });
-    
-    const imageMesh = new THREE.Mesh(imageGeometry, imageMaterial);
-    
-    // Position the image to face the center of the sphere
-    const direction = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), anchor.position).normalize();
-    imageMesh.position.copy(anchor.position).add(direction.multiplyScalar(1.0));
-    imageMesh.lookAt(0, 0, 0);
-    
-    // Load texture and apply it
-    const texture = new THREE.TextureLoader().load(imageData, (loadedTexture) => {
-        console.log('Texture loaded successfully');
-        // Update the material with the loaded texture
-        imageMaterial.map = loadedTexture;
-        imageMaterial.needsUpdate = true;
-        
-        // Update geometry with correct aspect ratio
-        const aspectRatio = loadedTexture.image.width / loadedTexture.image.height;
-        const imageSize = 4;
-        imageMesh.geometry.dispose();
-        imageMesh.geometry = new THREE.PlaneGeometry(
-            imageSize * aspectRatio,
-            imageSize
-        );
-        
-        console.log('Image rendered at position:', imageMesh.position);
-        console.log('Image size:', imageSize * aspectRatio, 'x', imageSize);
-    });
-    
-    scene.add(imageMesh);
-    anchor.imageMesh = imageMesh;
-    anchor.capturedImage = imageData;
-    
-    console.log('Image mesh added to scene');
-}
 
-// Function to get alignment score for an anchor point
-function getAlignmentScore(anchor: AnchorPoint): number {
-    // Get camera direction (where camera is looking)
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    
-    // Get direction from camera to anchor point
-    const anchorDirection = new THREE.Vector3().subVectors(anchor.position, camera.position).normalize();
-    
-    // Calculate how aligned the camera is with the anchor
-    const dotProduct = cameraDirection.dot(anchorDirection);
-    
-    return dotProduct;
-}
 
-// Function to check if camera orientation aligns with anchor point (kept for compatibility)
-function checkOrientationAlignment(anchor: AnchorPoint): boolean {
-    return getAlignmentScore(anchor) > 0.8;
-}
-
-// Variables for stillness detection
-let stillnessTimer: number = 0;
-let lastStillnessTime: number = 0;
-let currentTargetAnchor: AnchorPoint | null = null;
-
-// Performance optimization variables
-let lastCheckTime: number = 0;
-const checkInterval: number = 100; // Check every 100ms instead of every frame
 
 const rotationParams: RotationParams = {
     x: 0,
     y: 0,
     z: 0,
+    useDragControls: true,
     activateTracker: function(): void {
-        const cameraControl = new DeviceOrientationControls(camera);
+        // Switch to device orientation controls
+        if (orbitControls) {
+            orbitControls.enabled = false;
+        }
+        
+        // Reset camera position for device orientation
+        camera.position.set(0, 0, 0); // Center the camera
+        camera.rotation.set(0, 0, 0); // Reset rotation
+        
+        deviceOrientationControls = new DeviceOrientationControls(camera);
+        rotationParams.useDragControls = false;
+        console.log('Switched to device orientation controls - camera reset to center');
     }
 }
 
 // Initialize anchor points
-createAnchorPoints();
+anchorManager.createAnchorPoints(scene);
 
 // Initialize camera access
-requestCameraAccess();
+photoCaptureManager.requestCameraAccess();
+
+// Initialize OrbitControls for drag control
+orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.enableDamping = true;
+orbitControls.dampingFactor = 0.05;
+orbitControls.enableZoom = true;
+orbitControls.enablePan = false; // Disable panning to keep camera focused on sphere
+orbitControls.enableRotate = true; // Enable rotation (should be default)
+orbitControls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,    // Left mouse button for rotation
+    MIDDLE: THREE.MOUSE.DOLLY,   // Middle mouse button for zoom
+    RIGHT: THREE.MOUSE.PAN       // Right mouse button for pan (disabled)
+};
+orbitControls.touches = {
+    ONE: THREE.TOUCH.ROTATE,     // One finger for rotation
+    TWO: THREE.TOUCH.DOLLY_PAN   // Two fingers for zoom
+};
+orbitControls.target.set(0, 0, 0); // Focus on sphere center
+orbitControls.maxDistance = 50; // Limit zoom out
+orbitControls.minDistance = 5; // Limit zoom in
+console.log('OrbitControls initialized');
 
 const gui = new GUI();
 
-gui.add(rotationParams, 'x', -180, 180).onFinishChange( (value: number) => {
-    // Note: cube is not defined in the original code, commenting out
-    // cube.rotation.x = value * Math.PI / 180;
+gui.add(rotationParams, 'useDragControls').onChange((value: boolean) => {
+    if (orbitControls) {
+        orbitControls.enabled = value;
+        console.log('OrbitControls enabled:', value);
+    }
+    if (deviceOrientationControls) {
+        deviceOrientationControls.enabled = !value;
+    }
+    console.log('Drag controls:', value ? 'enabled' : 'disabled');
 })
-gui.add(rotationParams, 'y', -180, 180).onFinishChange( (value: number) => {
-    // cube.rotation.y = value * Math.PI / 180;
-})
-gui.add(rotationParams, 'z', -180, 180).onFinishChange( (value: number) => {
-    // cube.rotation.z = value * Math.PI / 180;
-})
+
+// Add debug function to test camera movement
+const debugParams = {
+    resetCamera: () => {
+        if (rotationParams.useDragControls) {
+            // Reset for drag controls
+            camera.position.set(0, 0, 30);
+            if (orbitControls) {
+                orbitControls.target.set(0, 0, 0);
+                orbitControls.update();
+            }
+            console.log('Camera reset for drag controls');
+        } else {
+            // Reset for device orientation
+            camera.position.set(0, 0, 0);
+            camera.rotation.set(0, 0, 0);
+            console.log('Camera reset for device orientation');
+        }
+    }
+};
+
+gui.add(debugParams, 'resetCamera').name('Reset Camera');
 gui.add(rotationParams, 'activateTracker')

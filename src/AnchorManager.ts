@@ -30,91 +30,50 @@ export class AnchorManager {
         const anchorGeometry = new THREE.SphereGeometry(0.3, 8, 6);
         const anchorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
         
-        // Top section (3 anchors)
-        for (let i = 0; i < 3; i++) {
-            const angle = (i / 3) * Math.PI * 2;
-            const x = Math.cos(angle) * this.sphereRadius * 0.8;
-            const z = Math.sin(angle) * this.sphereRadius * 0.8;
-            const y = this.sphereRadius * 0.8;
+        const sectionY = [
+            Math.sin(Math.PI * 0.4),
+            Math.sin(Math.PI * 0.25),
+            0
+        ]
+
+        const anchorPoints = [];
+        for (let i = 0; i < sectionY.length; i++) {
+            const y = sectionY[i] * this.sphereRadius;
             
-            const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-            anchorMesh.position.set(x, y, z);
-            scene.add(anchorMesh);
-            
-            this.anchorPoints.push({
-                position: new THREE.Vector3(x, y, z),
-                mesh: anchorMesh,
-                isActive: false
-            });
+            for (let j = 0; j < 3; j++) {
+                const angle = (j / 3) * Math.PI * 2;
+                const x = Math.cos(angle) * this.sphereRadius;
+                const z = - Math.sin(angle) * this.sphereRadius;
+
+                anchorPoints.push([x, y, z]);
+                anchorPoints.push([x, -y, z]);
+            }
+
+            for (let j = 0; j < 9 ; j++){
+                const angle = (j / 9) * Math.PI * 2;
+                const x = Math.cos(angle) * this.sphereRadius;
+                const z = - Math.sin(angle) * this.sphereRadius;
+
+                anchorPoints.push([x, y, z]);
+                anchorPoints.push([x, -y, z]);
+            }
+
+            for (let j = 0; j < 12 ; j++){
+                const angle = (j / 12) * Math.PI * 2;
+                const x = Math.cos(angle) * this.sphereRadius;
+                const z = - Math.sin(angle) * this.sphereRadius;
+
+                anchorPoints.push([x, y, z]);
+            }
         }
-        
-        // Top-mid section (9 anchors)
-        for (let i = 0; i < 9; i++) {
-            const angle = (i / 9) * Math.PI * 2;
-            const x = Math.cos(angle) * this.sphereRadius * 0.4;
-            const z = Math.sin(angle) * this.sphereRadius * 0.4;
-            const y = this.sphereRadius * 0.4;
-            
+
+        for (const anchorPoint of anchorPoints) {
             const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-            anchorMesh.position.set(x, y, z);
+            anchorMesh.position.set(anchorPoint[0], anchorPoint[1], anchorPoint[2]);
             scene.add(anchorMesh);
             
             this.anchorPoints.push({
-                position: new THREE.Vector3(x, y, z),
-                mesh: anchorMesh,
-                isActive: false
-            });
-        }
-        
-        // Mid section (12 anchors)
-        for (let i = 0; i < 12; i++) {
-            const angle = (i / 12) * Math.PI * 2;
-            const x = Math.cos(angle) * this.sphereRadius;
-            const z = Math.sin(angle) * this.sphereRadius;
-            const y = 0;
-            
-            const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-            anchorMesh.position.set(x, y, z);
-            scene.add(anchorMesh);
-            
-            this.anchorPoints.push({
-                position: new THREE.Vector3(x, y, z),
-                mesh: anchorMesh,
-                isActive: false
-            });
-        }
-        
-        // Bottom-mid section (9 anchors)
-        for (let i = 0; i < 9; i++) {
-            const angle = (i / 9) * Math.PI * 2;
-            const x = Math.cos(angle) * this.sphereRadius * 0.4;
-            const z = Math.sin(angle) * this.sphereRadius * 0.4;
-            const y = -this.sphereRadius * 0.4;
-            
-            const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-            anchorMesh.position.set(x, y, z);
-            scene.add(anchorMesh);
-            
-            this.anchorPoints.push({
-                position: new THREE.Vector3(x, y, z),
-                mesh: anchorMesh,
-                isActive: false
-            });
-        }
-        
-        // Bottom section (3 anchors)
-        for (let i = 0; i < 3; i++) {
-            const angle = (i / 3) * Math.PI * 2;
-            const x = Math.cos(angle) * this.sphereRadius * 0.8;
-            const z = Math.sin(angle) * this.sphereRadius * 0.8;
-            const y = -this.sphereRadius * 0.8;
-            
-            const anchorMesh = new THREE.Mesh(anchorGeometry, anchorMaterial.clone());
-            anchorMesh.position.set(x, y, z);
-            scene.add(anchorMesh);
-            
-            this.anchorPoints.push({
-                position: new THREE.Vector3(x, y, z),
+                position: new THREE.Vector3(anchorPoint[0], anchorPoint[1], anchorPoint[2]),
                 mesh: anchorMesh,
                 isActive: false
             });

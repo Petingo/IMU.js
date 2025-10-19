@@ -127,6 +127,12 @@ export class PhotoCaptureManager {
         return this.cameraState.isActive;
     }
 
+    public startDeviceOrientationTracking(camera: THREE.Camera): void {
+        // This method is called when device orientation tracking is activated
+        // The actual DeviceOrientationControls setup is handled in the App class
+        console.log('Device orientation tracking started for camera');
+    }
+    
     public stopCamera(): void {
         if (this.cameraState.stream) {
             this.cameraState.stream.getTracks().forEach(track => track.stop());

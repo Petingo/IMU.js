@@ -67,8 +67,6 @@ export class DeviceOrientationControls extends EventDispatcher<{ change: {} }> {
 		this.alphaOffset = 0; // radians
 
         this.update = function (): void {
-            console.log('update')
-
 			if ( scope.enabled === false ) return;
 
 			const device = scope.deviceOrientation;

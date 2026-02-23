@@ -7,7 +7,7 @@ export class App {
     private static instance: App;
     
     // Debug mode flag
-    public debugMode: boolean = true;
+    public debugMode: boolean = false;
     
     // Managers
     public sceneManager: SceneManager;

@@ -29,42 +29,38 @@ export class AnchorManager {
     public createAnchorPoints(scene: THREE.Scene): void {
         const anchorGeometry = new THREE.SphereGeometry(0.3, 8, 6);
         const anchorMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-        
-        const sectionY = [
-            Math.sin(Math.PI * 0.4),
-            Math.sin(Math.PI * 0.25),
-            0
-        ]
 
         const anchorPoints = [];
-        for (let i = 0; i < sectionY.length; i++) {
-            const y = sectionY[i] * this.sphereRadius;
-            
-            for (let j = 0; j < 3; j++) {
-                const angle = (j / 3) * Math.PI * 2;
-                const x = Math.cos(angle) * this.sphereRadius;
-                const z = - Math.sin(angle) * this.sphereRadius;
+        const topYAngle = Math.PI * 0.4;
+        const midYAngle = Math.PI * 0.2;
+        for (let j = 0; j < 3; j++) {
+            const angle = (j / 3) * Math.PI * 2;
+            const x = Math.cos(angle) * Math.cos(topYAngle) * this.sphereRadius;
+            const z = - Math.sin(angle) * Math.cos(topYAngle) * this.sphereRadius;
+            const y = Math.sin(topYAngle) * this.sphereRadius;
 
-                anchorPoints.push([x, y, z]);
-                anchorPoints.push([x, -y, z]);
-            }
+            anchorPoints.push([x, y, z]);
+            anchorPoints.push([x, -y, z]);
+        }
 
-            for (let j = 0; j < 9 ; j++){
-                const angle = (j / 9) * Math.PI * 2;
-                const x = Math.cos(angle) * this.sphereRadius;
-                const z = - Math.sin(angle) * this.sphereRadius;
+        
+        for (let j = 0; j < 9 ; j++){
+            const angle = (j / 9) * Math.PI * 2;
+            const x = Math.cos(angle) * Math.cos(midYAngle) * this.sphereRadius;
+            const z = - Math.sin(angle) * Math.cos(midYAngle) * this.sphereRadius;
+            const y = Math.sin(midYAngle) * this.sphereRadius;
 
-                anchorPoints.push([x, y, z]);
-                anchorPoints.push([x, -y, z]);
-            }
+            anchorPoints.push([x, y, z]);
+            anchorPoints.push([x, -y, z]);
+        }
 
-            for (let j = 0; j < 12 ; j++){
-                const angle = (j / 12) * Math.PI * 2;
-                const x = Math.cos(angle) * this.sphereRadius;
-                const z = - Math.sin(angle) * this.sphereRadius;
+        for (let j = 0; j < 12 ; j++){
+            const angle = (j / 12) * Math.PI * 2;
+            const x = Math.cos(angle) * this.sphereRadius;
+            const z = - Math.sin(angle) * this.sphereRadius;
+            const y = 0;
 
-                anchorPoints.push([x, y, z]);
-            }
+            anchorPoints.push([x, y, z]);
         }
 
         for (const anchorPoint of anchorPoints) {

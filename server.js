@@ -23,7 +23,7 @@ const options = {
 // Create HTTPS server
 const server = https.createServer(options, app);
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`HTTPS Server running on https://localhost:${PORT}`);
     console.log('Note: You may need to accept the self-signed certificate in your browser');
 });

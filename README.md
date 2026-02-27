@@ -29,6 +29,8 @@ npm start
 
 4. Open your browser and navigate to `https://localhost:5500`
    - You may need to accept the self-signed certificate
+   - For iOS devices on the same network, use `https://<your-computer-ip>:5500` instead of localhost
+     - Find your computer's IP: Run `ipconfig` (Windows) or `ifconfig` (Mac/Linux) and use your local network IP
    - For iOS devices, you'll need to grant permission for device orientation
 
 ## Development
